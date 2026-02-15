@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+python-dateutil
+plotly
+openpyxl
+xlrd
+pdfplumber
+fpdf
+python-dotenv
