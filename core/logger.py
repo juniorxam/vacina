@@ -6,7 +6,6 @@ import logging
 import os
 import sys
 from datetime import datetime
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from config import CONFIG
@@ -15,47 +14,70 @@ from config import CONFIG
 def setup_logging():
     """Configura o sistema de logging da aplicação"""
     
-    # Criar diretório de logs se não existir
+    # Detectar ambiente
+    is_cloud = CONFIG.is_streamlit_cloud or os.getenv('STREAMLIT_CLOUD', 'false').lower() == 'true'
+    
+    # Formato do log
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    date_format = "%Y-%m-%d %H:%M:%S"
+    formatter = logging.Formatter(log_format, date_format)
+    
+    # Handler para console (sempre presente)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    
+    # Configurar root logger
+    root_logger = logging.getLogger()
+    
+    # Em produção/cloud, usar apenas console
+    if is_cloud or CONFIG.environment == "production":
+        root_logger.setLevel(logging.INFO)
+        # Remover handlers existentes
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        root_logger.addHandler(console_handler)
+        logging.info("Logging configurado para modo cloud (apenas console)")
+        return root_logger
+    
+    # Em desenvolvimento, adicionar arquivo
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
     
-    # Nome do arquivo de log com data
     log_file = log_dir / f"nasst_{datetime.now().strftime('%Y%m')}.log"
     
-    # Formato do log
-    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
-    date_format = "%Y-%m-%d %H:%M:%S"
-    
-    # Configurar handler para arquivo (com rotação)
+    # Handler para arquivo (com rotação)
+    from logging.handlers import RotatingFileHandler
     file_handler = RotatingFileHandler(
         log_file,
         maxBytes=10 * 1024 * 1024,  # 10MB
         backupCount=5,
         encoding="utf-8"
     )
-    file_handler.setFormatter(logging.Formatter(log_format, date_format))
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
+        date_format
+    ))
     
-    # Configurar handler para console
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(logging.Formatter(log_format, date_format))
-    
-    # Configurar nível baseado no ambiente
-    if CONFIG.environment == "production":
-        level = logging.WARNING
-        console_handler.setLevel(logging.WARNING)
-    else:
-        level = logging.DEBUG
+    # Configurar nível baseado no debug
+    if CONFIG.debug:
+        root_logger.setLevel(logging.DEBUG)
         console_handler.setLevel(logging.DEBUG)
+    else:
+        root_logger.setLevel(logging.INFO)
+        console_handler.setLevel(logging.INFO)
     
-    # Configurar root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
+    # Remover handlers existentes e adicionar os novos
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
     
-    # Silenciar logs muito verbosos de bibliotecas
+    # Silenciar logs muito verbosos
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("pdfplumber").setLevel(logging.WARNING)
+    
+    logging.info(f"Logging configurado para modo desenvolvimento. Arquivo: {log_file}")
     
     return root_logger
 
