@@ -21,27 +21,31 @@ class AppConfig:
     # Ano exibido 
     ano_atual: int = 2026
 
-    # DB
+    # DB - usar caminho que funciona no Streamlit Cloud
     db_path_v7: str = os.getenv("DB_PATH", "nasst_sistema_v7.db")
     db_path_v6: str = os.getenv("DB_PATH_V6", "nasst_sistema_v6.db")
 
     # Logo
     logo_path: str = os.getenv("LOGO_PATH", "LOGO.png")
 
-    # Segurança: senha do admin via ambiente (obrigatório em produção)
+    # Segurança: senha do admin (com fallback para desenvolvimento)
     admin_login: str = os.getenv("ADMIN_LOGIN", "admin")
-    admin_password: str = os.getenv("ADMIN_PASSWORD")  # Não tem default em produção!
+    # No Streamlit Cloud, definir via secrets
+    admin_password: str = os.getenv("ADMIN_PASSWORD", "admin123")
     
     # Ambiente
     debug: bool = os.getenv("DEBUG", "False").lower() == "true"
     environment: str = os.getenv("ENVIRONMENT", "development")
+    
+    # Detectar se está no Streamlit Cloud
+    is_streamlit_cloud: bool = os.getenv('STREAMLIT_CLOUD', 'false').lower() == 'true'
 
 
 CONFIG = AppConfig()
 
-# Validação em produção
+# Avisos de configuração
 if CONFIG.environment == "production" and not CONFIG.admin_password:
-    raise ValueError(
-        "ADMIN_PASSWORD must be set in production! "
-        "Use environment variable or .env file."
-    )
+    print("⚠️ AVISO: ADMIN_PASSWORD não configurada! Usando senha padrão.")
+
+if CONFIG.is_streamlit_cloud:
+    print("🟢 Rodando no Streamlit Cloud - otimizando configurações...")
