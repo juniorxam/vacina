@@ -9,6 +9,20 @@ import sys
 import atexit
 from datetime import datetime
 
+# No início do app.py, após os imports
+
+# Detectar ambiente Cloud
+IS_CLOUD = os.getenv('STREAMLIT_CLOUD', 'false').lower() == 'true'
+
+if IS_CLOUD:
+    print("=" * 60)
+    print("🚀 NASST Digital rodando no Streamlit Cloud")
+    print("=" * 60)
+    
+    # Configurações específicas para cloud
+    os.environ['ENVIRONMENT'] = 'production'
+
+
 # Configuração da página DEVE ser a primeira chamada Streamlit
 st.set_page_config(
     page_title="NASST Digital - Controle de Vacinação",
