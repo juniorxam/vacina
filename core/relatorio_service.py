@@ -1,5 +1,5 @@
 """
-relatorio_service.py - Serviços de relatórios e dashboards
+relatorio_service.py - Serviços de relatórios e dashboards com correção de encoding
 """
 
 import os
@@ -9,8 +9,6 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import plotly.graph_objects as go
 from fpdf import FPDF
-
-from core.security import Formatters
 
 
 class RelatoriosService:
@@ -260,7 +258,7 @@ class RelatoriosGerenciaisService:
             (id_comp,)
         )
         
-        idade = Formatters.calcular_idade(servidor_dict.get("data_nascimento"))
+        idade = self._calcular_idade(servidor_dict.get("data_nascimento"))
         
         return {
             "servidor": servidor_dict,
@@ -269,6 +267,11 @@ class RelatoriosGerenciaisService:
             "total_doses": len(historico),
             "data_geracao": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         }
+
+    def _calcular_idade(self, data_nascimento: Any) -> Optional[int]:
+        """Calcula a idade a partir da data de nascimento"""
+        from core.security import Formatters
+        return Formatters.calcular_idade(data_nascimento)
 
     def gerar_relatorio_cobertura_geral(self) -> Dict[str, Any]:
         total_servidores = self.db.fetchone(
@@ -375,196 +378,215 @@ class RelatoriosGerenciaisService:
 
 
 class RelatorioPDFService:
-    """Servico de geracao de relatorios PDF"""
+    """Servico de geracao de relatorios PDF - CORRIGIDO: encoding UTF-8"""
     
     @staticmethod
+    def _safe_str(value: Any) -> str:
+        """Converte qualquer valor para string de forma segura"""
+        if value is None:
+            return ""
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, (date, datetime)):
+            return value.strftime("%d/%m/%Y")
+        # Converter para string e garantir que é UTF-8
+        return str(value).encode('latin-1', errors='replace').decode('latin-1')
+
+    @staticmethod
     def _parse_date(value):
+        from core.security import Formatters
         return Formatters.parse_date(value)
 
     @staticmethod
     def _calcular_idade(data):
+        from core.security import Formatters
         idade = Formatters.calcular_idade(data)
         return f"{idade} anos" if idade is not None else "Não informada"
 
     @staticmethod
     def _calcular_tempo_servico(data):
+        from core.security import Formatters
         return Formatters.calcular_tempo_servico(data)
 
     @staticmethod
     def _formatar_cpf(cpf):
-        return Formatters.formatar_cpf(cpf)
+        from core.security import Security
+        return Security.formatar_cpf(cpf)
 
     @staticmethod
     def _formatar_data(data):
+        from core.security import Formatters
         return Formatters.formatar_data_br(data) or "Não informado"
 
     @staticmethod
     def gerar_ficha_cadastral_pdf(logo_path, servidor: dict, historico_vacinacao: list) -> bytes:
-        """Gera ficha cadastral do servidor em PDF"""
+        """Gera ficha cadastral do servidor em PDF - CORRIGIDO: encoding"""
         pdf = FPDF()
         pdf.add_page()
+        
+        # Configurar fonte padrão
+        pdf.set_auto_page_break(auto=True, margin=15)
         
         # CABECALHO
         if logo_path and os.path.exists(logo_path):
             pdf.image(logo_path, 10, 8, 20)
         
         pdf.set_font("Arial", "B", 16)
-        pdf.cell(0, 10, "NASST DIGITAL", 0, 1, "C")
+        pdf.cell(0, 10, RelatorioPDFService._safe_str("NASST DIGITAL"), 0, 1, "C")
         pdf.set_font("Arial", "", 10)
-        pdf.cell(0, 6, "Ficha Cadastral do Servidor", 0, 1, "C")
+        pdf.cell(0, 6, RelatorioPDFService._safe_str("Ficha Cadastral do Servidor"), 0, 1, "C")
         pdf.ln(5)
 
         # 1. IDENTIFICACAO
         pdf.set_font("Arial", "B", 12)
         pdf.set_fill_color(220, 220, 220)
-        pdf.cell(0, 7, "1. IDENTIFICACAO DO SERVIDOR", 0, 1, "L", 1)
+        pdf.cell(0, 7, RelatorioPDFService._safe_str("1. IDENTIFICACAO DO SERVIDOR"), 0, 1, "L", 1)
         pdf.ln(2)
         
         # NOME
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(20, 6, "Nome:", 0, 0)
+        pdf.cell(20, 6, RelatorioPDFService._safe_str("Nome:"), 0, 0)
         pdf.set_font("Arial", "", 10)
-        pdf.cell(0, 6, servidor.get("nome", "Nao informado"), 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(servidor.get("nome", "Nao informado")), 0, 1)
         
         # CPF e MATRICULA
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(20, 6, "CPF:", 0, 0)
+        pdf.cell(20, 6, RelatorioPDFService._safe_str("CPF:"), 0, 0)
         pdf.set_font("Arial", "", 10)
         cpf = servidor.get("cpf", "Nao informado")
         if cpf and len(str(cpf)) == 11:
             cpf = f"{str(cpf)[:3]}.{str(cpf)[3:6]}.{str(cpf)[6:9]}-{str(cpf)[9:]}"
-        pdf.cell(70, 6, str(cpf), 0, 0)
+        pdf.cell(70, 6, RelatorioPDFService._safe_str(str(cpf)), 0, 0)
         
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "Matricula:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("Matricula:"), 0, 0)
         pdf.set_font("Arial", "", 10)
         matricula = f"{servidor.get('numfunc', '')}-{servidor.get('numvinc', '')}"
         if matricula == "-":
             matricula = servidor.get("id_comp", "Nao informado")
-        pdf.cell(0, 6, matricula, 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(matricula), 0, 1)
         
         # DATA NASCIMENTO e IDADE
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(20, 6, "Nasc:", 0, 0)
+        pdf.cell(20, 6, RelatorioPDFService._safe_str("Nasc:"), 0, 0)
         pdf.set_font("Arial", "", 10)
         
         data_nasc = servidor.get("data_nascimento")
-        data_nasc_str = Formatters.formatar_data_br(data_nasc) or "Não informado"
-        idade = Formatters.calcular_idade(data_nasc)
-        idade_str = f"{idade} anos" if idade is not None else "Não informada"
+        data_nasc_str = RelatorioPDFService._formatar_data(data_nasc)
+        idade = RelatorioPDFService._calcular_idade(data_nasc)
         
-        pdf.cell(70, 6, data_nasc_str, 0, 0)
+        pdf.cell(70, 6, RelatorioPDFService._safe_str(data_nasc_str), 0, 0)
         
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "Idade:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("Idade:"), 0, 0)
         pdf.set_font("Arial", "", 10)
-        pdf.cell(0, 6, idade_str, 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(idade), 0, 1)
         
         # SEXO
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(20, 6, "Sexo:", 0, 0)
+        pdf.cell(20, 6, RelatorioPDFService._safe_str("Sexo:"), 0, 0)
         pdf.set_font("Arial", "", 10)
-        pdf.cell(0, 6, servidor.get("sexo", "Nao informado"), 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(servidor.get("sexo", "Nao informado")), 0, 1)
         pdf.ln(3)
 
         # 2. DADOS FUNCIONAIS
         pdf.set_font("Arial", "B", 12)
         pdf.set_fill_color(220, 220, 220)
-        pdf.cell(0, 7, "2. DADOS FUNCIONAIS", 0, 1, "L", 1)
+        pdf.cell(0, 7, RelatorioPDFService._safe_str("2. DADOS FUNCIONAIS"), 0, 1, "L", 1)
         pdf.ln(2)
         
         # CARGO
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "Cargo:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("Cargo:"), 0, 0)
         pdf.set_font("Arial", "", 10)
-        pdf.cell(0, 6, servidor.get("cargo", "Nao informado"), 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(servidor.get("cargo", "Nao informado")), 0, 1)
         
         # LOTACAO
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "Lotacao:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("Lotacao:"), 0, 0)
         pdf.set_font("Arial", "", 10)
-        pdf.cell(0, 6, servidor.get("lotacao", "Nao informado"), 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(servidor.get("lotacao", "Nao informado")), 0, 1)
         
         # LOCAL FISICO
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "Local Fisico:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("Local Fisico:"), 0, 0)
         pdf.set_font("Arial", "", 10)
         local = servidor.get("lotacao_fisica", "Nao informado")
         if local in [None, "None", ""]:
             local = "Nao informado"
-        pdf.cell(0, 6, str(local), 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(str(local)), 0, 1)
         
         # VINCULO e SITUACAO
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "Vinculo:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("Vinculo:"), 0, 0)
         pdf.set_font("Arial", "", 10)
         vinculo = servidor.get("tipo_vinculo", "Nao informado")
         if vinculo in [None, "None", ""]:
             vinculo = "Nao informado"
-        pdf.cell(70, 6, str(vinculo), 0, 0)
+        pdf.cell(70, 6, RelatorioPDFService._safe_str(str(vinculo)), 0, 0)
         
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "Situacao:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("Situacao:"), 0, 0)
         pdf.set_font("Arial", "", 10)
-        pdf.cell(0, 6, servidor.get("situacao_funcional", "ATIVO"), 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(servidor.get("situacao_funcional", "ATIVO")), 0, 1)
         
         # ADMISSAO e TEMPO
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "Admissao:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("Admissao:"), 0, 0)
         pdf.set_font("Arial", "", 10)
         
         data_adm = servidor.get("data_admissao")
-        data_adm_str = Formatters.formatar_data_br(data_adm) or "Não informado"
-        tempo_str = Formatters.calcular_tempo_servico(data_adm)
+        data_adm_str = RelatorioPDFService._formatar_data(data_adm)
+        tempo_str = RelatorioPDFService._calcular_tempo_servico(data_adm)
         
-        pdf.cell(70, 6, data_adm_str, 0, 0)
+        pdf.cell(70, 6, RelatorioPDFService._safe_str(data_adm_str), 0, 0)
         
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "Tempo:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("Tempo:"), 0, 0)
         pdf.set_font("Arial", "", 10)
-        pdf.cell(0, 6, tempo_str, 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(tempo_str), 0, 1)
         pdf.ln(3)
 
         # 3. CONTATOS
         pdf.set_font("Arial", "B", 12)
         pdf.set_fill_color(220, 220, 220)
-        pdf.cell(0, 7, "3. CONTATOS", 0, 1, "L", 1)
+        pdf.cell(0, 7, RelatorioPDFService._safe_str("3. CONTATOS"), 0, 1, "L", 1)
         pdf.ln(2)
         
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "Telefone:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("Telefone:"), 0, 0)
         pdf.set_font("Arial", "", 10)
         fone = servidor.get("telefone", "Nao informado")
         if fone in [None, "None", ""]:
             fone = "Nao informado"
-        pdf.cell(0, 6, str(fone), 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(str(fone)), 0, 1)
         
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(25, 6, "E-mail:", 0, 0)
+        pdf.cell(25, 6, RelatorioPDFService._safe_str("E-mail:"), 0, 0)
         pdf.set_font("Arial", "", 10)
         email = servidor.get("email", "Nao informado")
         if email in [None, "None", ""]:
             email = "Nao informado"
-        pdf.cell(0, 6, str(email), 0, 1)
+        pdf.cell(0, 6, RelatorioPDFService._safe_str(str(email)), 0, 1)
         pdf.ln(3)
 
         # 4. HISTORICO VACINAL
         pdf.set_font("Arial", "B", 12)
         pdf.set_fill_color(220, 220, 220)
-        pdf.cell(0, 7, "4. HISTORICO VACINAL", 0, 1, "L", 1)
+        pdf.cell(0, 7, RelatorioPDFService._safe_str("4. HISTORICO VACINAL"), 0, 1, "L", 1)
         pdf.ln(2)
         
         if not historico_vacinacao:
             pdf.set_font("Arial", "I", 10)
-            pdf.cell(0, 6, "Nenhum registro de vacinacao encontrado para este servidor.", 0, 1, "C")
+            pdf.cell(0, 6, RelatorioPDFService._safe_str("Nenhum registro de vacinacao encontrado para este servidor."), 0, 1, "C")
         else:
             # Cabeçalho da tabela
             pdf.set_font("Arial", "B", 9)
             pdf.set_fill_color(200, 200, 200)
-            pdf.cell(60, 6, "Vacina", 1, 0, "C", 1)
-            pdf.cell(30, 6, "Dose", 1, 0, "C", 1)
-            pdf.cell(45, 6, "Data Aplicacao", 1, 0, "C", 1)
-            pdf.cell(45, 6, "Proximo", 1, 1, "C", 1)
+            pdf.cell(60, 6, RelatorioPDFService._safe_str("Vacina"), 1, 0, "C", 1)
+            pdf.cell(30, 6, RelatorioPDFService._safe_str("Dose"), 1, 0, "C", 1)
+            pdf.cell(45, 6, RelatorioPDFService._safe_str("Data Aplicacao"), 1, 0, "C", 1)
+            pdf.cell(45, 6, RelatorioPDFService._safe_str("Proximo"), 1, 1, "C", 1)
             
             # Dados
             pdf.set_font("Arial", "", 8)
@@ -576,26 +598,27 @@ class RelatorioPDFService:
                     # Reimprimir cabeçalho na nova página
                     pdf.set_font("Arial", "B", 9)
                     pdf.set_fill_color(200, 200, 200)
-                    pdf.cell(60, 6, "Vacina", 1, 0, "C", 1)
-                    pdf.cell(30, 6, "Dose", 1, 0, "C", 1)
-                    pdf.cell(45, 6, "Data Aplicacao", 1, 0, "C", 1)
-                    pdf.cell(45, 6, "Proximo", 1, 1, "C", 1)
+                    pdf.cell(60, 6, RelatorioPDFService._safe_str("Vacina"), 1, 0, "C", 1)
+                    pdf.cell(30, 6, RelatorioPDFService._safe_str("Dose"), 1, 0, "C", 1)
+                    pdf.cell(45, 6, RelatorioPDFService._safe_str("Data Aplicacao"), 1, 0, "C", 1)
+                    pdf.cell(45, 6, RelatorioPDFService._safe_str("Proximo"), 1, 1, "C", 1)
                     pdf.set_font("Arial", "", 8)
                 
-                # Linha de dados
-                pdf.cell(60, 5, str(v.get("vacina", ""))[:20], 1)
-                pdf.cell(30, 5, str(v.get("dose", ""))[:8], 1, 0, "C")
+                # Linha de dados - usando safe_str
+                pdf.cell(60, 5, RelatorioPDFService._safe_str(str(v.get("vacina", ""))[:20]), 1)
+                pdf.cell(30, 5, RelatorioPDFService._safe_str(str(v.get("dose", ""))[:8]), 1, 0, "C")
                 
-                da = Formatters.formatar_data_br(v.get("data_ap"))
-                pdf.cell(45, 5, da if da else "-", 1, 0, "C")
+                da = RelatorioPDFService._formatar_data(v.get("data_ap"))
+                pdf.cell(45, 5, RelatorioPDFService._safe_str(da if da else "-"), 1, 0, "C")
                 
-                dr = Formatters.formatar_data_br(v.get("data_ret"))
-                pdf.cell(45, 5, dr if dr else "-", 1, 1, "C")
+                dr = RelatorioPDFService._formatar_data(v.get("data_ret"))
+                pdf.cell(45, 5, RelatorioPDFService._safe_str(dr if dr else "-"), 1, 1, "C")
 
         # RODAPE
         pdf.set_y(260)
         pdf.set_font("Arial", "I", 8)
-        pdf.cell(0, 5, f"Emitido em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", 0, 1, "R")
-        pdf.cell(0, 5, "Documento gerado eletronicamente pelo sistema NASST Digital.", 0, 1, "C")
+        pdf.cell(0, 5, RelatorioPDFService._safe_str(f"Emitido em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"), 0, 1, "R")
+        pdf.cell(0, 5, RelatorioPDFService._safe_str("Documento gerado eletronicamente pelo sistema NASST Digital."), 0, 1, "C")
 
-        return bytes(pdf.output(dest="S"))
+        # CORREÇÃO CRÍTICA: usar output com encoding latin-1
+        return bytes(pdf.output(dest="S").encode('latin-1'))
