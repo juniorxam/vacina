@@ -10,3 +10,5 @@ fpdf
 python-dotenv
 schedule
 reportlab
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
