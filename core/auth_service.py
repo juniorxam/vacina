@@ -1,5 +1,5 @@
 """
-auth_service.py - Serviços de autenticação e auditoria com rate limiting e bloqueio de conta
+auth_service.py - Serviços de autenticação e auditoria com IP real
 """
 
 import logging
@@ -7,18 +7,19 @@ from datetime import datetime
 from typing import Dict, Optional
 
 from .security import Security
+from .ip_utils import IPUtils
 
 logger = logging.getLogger(__name__)
 
 
 class AuditLog:
-    """Serviço de registro de logs de auditoria"""
+    """Serviço de registro de logs de auditoria com IP automático"""
     
     def __init__(self, db: "Database") -> None:
         self.db = db
         logger.debug("AuditLog inicializado")
 
-    def registrar(self, usuario: str, modulo: str, acao: str, detalhes: str = "", ip_address: str = "127.0.0.1") -> None:
+    def registrar(self, usuario: str, modulo: str, acao: str, detalhes: str = "", ip_address: Optional[str] = None) -> None:
         """
         Registra uma ação no log de auditoria
         
@@ -27,9 +28,13 @@ class AuditLog:
             modulo: Módulo do sistema (AUTH, SERVIDORES, etc)
             acao: Ação executada
             detalhes: Detalhes adicionais
-            ip_address: Endereço IP do usuário
+            ip_address: Endereço IP do usuário (se None, captura automaticamente)
         """
         try:
+            # Capturar IP automaticamente se não fornecido
+            if ip_address is None:
+                ip_address = IPUtils.get_client_ip()
+            
             agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.db.execute(
                 """
@@ -38,41 +43,53 @@ class AuditLog:
                 """,
                 (agora, usuario, modulo, acao, detalhes, ip_address),
             )
-            logger.info(f"AUDIT: {usuario} - {modulo} - {acao} - {detalhes[:50]}")
+            
+            # Log com IP mascarado para segurança
+            ip_masked = IPUtils.mask_ip(ip_address)
+            logger.info(f"AUDIT: {usuario} - {modulo} - {acao} - {detalhes[:50]} (IP: {ip_masked})")
+            
         except Exception as e:
             logger.error(f"Erro ao registrar log de auditoria: {e}", exc_info=True)
             # Não relançar a exceção para não interromper o fluxo principal
 
 
 class Auth:
-    """Serviço de autenticação e autorização com rate limiting e bloqueio de conta"""
+    """Serviço de autenticação e autorização com IP real"""
     
     def __init__(self, db: "Database") -> None:
         self.db = db
         self._login_attempts_memory = {}  # Rate limit em memória (por IP)
         logger.debug("Auth inicializado")
 
-    def login(self, login: str, senha: str, ip: str = "127.0.0.1") -> Optional[Dict[str, str]]:
+    def _get_client_ip(self) -> str:
+        """Obtém IP do cliente"""
+        return IPUtils.get_client_ip()
+
+    def login(self, login: str, senha: str, ip: Optional[str] = None) -> Optional[Dict[str, str]]:
         """
         Realiza login do usuário com rate limiting e bloqueio de conta
         
         Args:
             login: Login do usuário
             senha: Senha do usuário
-            ip: Endereço IP para rate limiting
+            ip: Endereço IP (se None, captura automaticamente)
             
         Returns:
             Dict com nome e nível de acesso ou None se falhar
         """
+        # Capturar IP se não fornecido
+        if ip is None:
+            ip = self._get_client_ip()
+        
         # Rate limiting por IP (em memória)
         if not self._check_rate_limit_memory(ip):
-            logger.warning(f"Rate limit excedido para IP {ip}")
+            logger.warning(f"Rate limit excedido para IP {IPUtils.mask_ip(ip)}")
             return None
         
         # Verificar bloqueio de conta (no banco)
         bloqueado, minutos = self._check_account_locked(login)
         if bloqueado:
-            logger.warning(f"Conta {login} bloqueada por {minutos} minutos")
+            logger.warning(f"Conta {login} bloqueada por {minutos} minutos (IP: {IPUtils.mask_ip(ip)})")
             return None
 
         try:
@@ -83,13 +100,13 @@ class Auth:
             )
             
             if row:
-                logger.info(f"Login bem-sucedido: {login} ({row['nivel_acesso']})")
+                logger.info(f"Login bem-sucedido: {login} ({row['nivel_acesso']}) - IP: {IPUtils.mask_ip(ip)}")
                 self._reset_rate_limit_memory(ip)
                 # Limpar tentativas após login bem-sucedido
                 self._clear_login_attempts(login)
                 return {"nome": str(row["nome"]), "nivel_acesso": str(row["nivel_acesso"])}
             else:
-                logger.warning(f"Tentativa de login falha: {login} (IP: {ip})")
+                logger.warning(f"Tentativa de login falha: {login} (IP: {IPUtils.mask_ip(ip)})")
                 self._register_failed_attempt_memory(ip)
                 # Registrar tentativa no banco
                 self._register_failed_attempt_db(login, ip)
@@ -215,23 +232,8 @@ class Auth:
 
     def criar_usuario(self, login: str, nome: str, senha: str, nivel: str, 
                       lotacao: str, ativo: bool = True, criado_por: str = None) -> tuple[bool, str]:
-        """
-        Cria um novo usuário no sistema
-        
-        Args:
-            login: Login único do usuário
-            nome: Nome completo
-            senha: Senha (mínimo 6 caracteres)
-            nivel: Nível de acesso
-            lotacao: Lotação permitida
-            ativo: Se o usuário está ativo
-            criado_por: Login de quem está criando
-            
-        Returns:
-            (sucesso, mensagem)
-        """
+        """Cria um novo usuário no sistema"""
         try:
-            # Validações
             if len(senha) < 6:
                 return False, "Senha deve ter pelo menos 6 caracteres"
                 
@@ -241,7 +243,6 @@ class Auth:
             if not nome or not nome.strip():
                 return False, "Nome é obrigatório"
             
-            # Verificar se login já existe
             existe = self.db.fetchone(
                 "SELECT login FROM usuarios WHERE login = ?",
                 (login.strip(),)
@@ -249,7 +250,6 @@ class Auth:
             if existe:
                 return False, f"Login '{login}' já existe"
             
-            # Criar usuário
             senha_hash = Security.sha256_hex(senha)
             self.db.execute(
                 """
@@ -267,23 +267,11 @@ class Auth:
             return False, f"Erro ao criar usuário: {str(e)}"
 
     def alterar_senha(self, login: str, senha_atual: str, nova_senha: str) -> tuple[bool, str]:
-        """
-        Altera a senha de um usuário
-        
-        Args:
-            login: Login do usuário
-            senha_atual: Senha atual para verificação
-            nova_senha: Nova senha
-            
-        Returns:
-            (sucesso, mensagem)
-        """
+        """Altera a senha de um usuário"""
         try:
-            # Validações
             if len(nova_senha) < 6:
                 return False, "Nova senha deve ter pelo menos 6 caracteres"
             
-            # Verificar senha atual
             senha_atual_hash = Security.sha256_hex(senha_atual)
             usuario = self.db.fetchone(
                 "SELECT login FROM usuarios WHERE login = ? AND senha = ? AND ativo = 1",
@@ -293,11 +281,9 @@ class Auth:
             if not usuario:
                 return False, "Senha atual incorreta"
             
-            # Verificar se nova senha é diferente da atual
             if senha_atual == nova_senha:
                 return False, "Nova senha deve ser diferente da atual"
             
-            # Atualizar senha
             nova_senha_hash = Security.sha256_hex(nova_senha)
             self.db.execute(
                 "UPDATE usuarios SET senha = ? WHERE login = ?",
@@ -312,17 +298,7 @@ class Auth:
             return False, f"Erro ao alterar senha: {str(e)}"
 
     def resetar_senha(self, login: str, nova_senha: str, admin_login: str) -> tuple[bool, str]:
-        """
-        Reseta a senha de um usuário (apenas admin)
-        
-        Args:
-            login: Login do usuário
-            nova_senha: Nova senha
-            admin_login: Login do administrador
-            
-        Returns:
-            (sucesso, mensagem)
-        """
+        """Reseta a senha de um usuário (apenas admin)"""
         try:
             if len(nova_senha) < 6:
                 return False, "Nova senha deve ter pelo menos 6 caracteres"
@@ -341,15 +317,7 @@ class Auth:
             return False, f"Erro ao resetar senha: {str(e)}"
 
     def listar_usuarios(self, apenas_ativos: bool = True) -> list[Dict]:
-        """
-        Lista todos os usuários do sistema
-        
-        Args:
-            apenas_ativos: Se True, lista apenas usuários ativos
-            
-        Returns:
-            Lista de dicionários com dados dos usuários
-        """
+        """Lista todos os usuários do sistema"""
         try:
             query = "SELECT login, nome, nivel_acesso, lotacao_permitida, ativo, data_criacao FROM usuarios"
             if apenas_ativos:
