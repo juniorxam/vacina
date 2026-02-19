@@ -1,14 +1,14 @@
 """
-logs.py - Página de logs do sistema
+logs.py - Página de logs do sistema com IP real
 """
 
 import io
-
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 from ui.components import UIComponents
+from core.ip_utils import IPUtils
 
 
 class LogsPage:
@@ -69,9 +69,12 @@ class LogsPage:
 
             df_logs = logs.copy()
             df_logs['data_hora'] = pd.to_datetime(df_logs['data_hora']).dt.strftime('%d/%m/%Y %H:%M:%S')
+            
+            # Mascarar IPs para exibição (opcional)
+            df_logs['ip_masked'] = df_logs['ip_address'].apply(IPUtils.mask_ip)
 
             with st.expander("📈 Estatísticas"):
-                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
 
                 with col_stat1:
                     usuarios_unicos = df_logs['usuario'].nunique()
@@ -84,19 +87,26 @@ class LogsPage:
                 with col_stat3:
                     acoes_unicas = df_logs['acao'].nunique()
                     st.metric("Tipos de Ação", acoes_unicas)
+                
+                with col_stat4:
+                    ips_unicos = df_logs['ip_address'].nunique()
+                    st.metric("IPs Únicos", ips_unicos)
 
-                modulos_count = df_logs['modulo'].value_counts()
-                if not modulos_count.empty:
-                    fig = px.pie(
-                        values=modulos_count.values,
-                        names=modulos_count.index,
-                        title='Distribuição de Logs por Módulo'
+                # Gráfico de IPs mais frequentes
+                ip_count = df_logs['ip_masked'].value_counts().head(10)
+                if not ip_count.empty:
+                    fig_ip = px.bar(
+                        x=ip_count.values,
+                        y=ip_count.index,
+                        orientation='h',
+                        title='Top 10 IPs por Atividade',
+                        labels={'x': 'Quantidade de Ações', 'y': 'IP (Mascarado)'}
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig_ip, use_container_width=True)
 
             st.subheader("📋 Registros de Log")
             st.dataframe(
-                df_logs,
+                df_logs[['data_hora', 'usuario', 'modulo', 'acao', 'detalhes', 'ip_masked']],
                 use_container_width=True,
                 hide_index=True,
                 column_config={
@@ -105,7 +115,7 @@ class LogsPage:
                     "modulo": "Módulo",
                     "acao": "Ação",
                     "detalhes": "Detalhes",
-                    "ip_address": "IP"
+                    "ip_masked": "IP (Mascarado)"
                 }
             )
 
