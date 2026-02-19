@@ -62,7 +62,6 @@ from core.estrutura_service import EstruturaOrganizacionalService
 from core.whatsapp_service import NotificacaoCampanhaService
 from ui.styles import Styles
 from ui.components import UIComponents
-from ui.accessibility import AccessibilityManager
 from core.backup import BackupManager, BackupScheduler
 
 # Imports das páginas
@@ -261,10 +260,9 @@ class NASSTApp:
         logger.debug(f"Sessão inicializada para {len(defaults)} variáveis")
     
     def _inject_styles(self):
-        """Injeta CSS e JavaScript personalizado"""
+        """Injeta CSS personalizado"""
         try:
             Styles.inject()
-            AccessibilityManager.inject_accessibility_js()
         except Exception as e:
             logger.warning(f"Erro ao injetar estilos: {e}")
     
@@ -281,9 +279,6 @@ class NASSTApp:
         """, unsafe_allow_html=True)
         
         with st.sidebar:
-            AccessibilityManager.create_high_contrast_toggle()
-            st.markdown("---")
-            
             st.markdown("### 📍 Menu")
             
             menu_items = [
