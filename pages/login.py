@@ -1,18 +1,18 @@
 """
-login.py - Página de login
+login.py - Página de login com IP real
 """
 
 import os
-
 import streamlit as st
 
 from config import CONFIG
 from core.security import Security
+from core.ip_utils import IPUtils
 from ui.components import UIComponents
 
 
 class LoginPage:
-    """Página de login"""
+    """Página de login com captura de IP"""
     
     def __init__(self, auth, audit):
         self.auth = auth
@@ -21,6 +21,10 @@ class LoginPage:
     def render(self):
         """Renderiza a página de login"""
         st.title(f"🔐 {CONFIG.app_title}")
+        
+        # Capturar IP do usuário
+        client_ip = IPUtils.get_client_ip()
+        ip_masked = IPUtils.mask_ip(client_ip)
         
         if os.path.exists(CONFIG.logo_path):
             import base64
@@ -48,11 +52,13 @@ class LoginPage:
                 </div>
                 """, unsafe_allow_html=True)
 
+                # Mostrar IP (opcional, para debug)
+                st.caption(f"🌐 Seu IP: {ip_masked}")
+
                 with st.form("login_form"):
                     login = st.text_input("👤 Usuário", placeholder="Digite seu login")
                     senha = st.text_input("🔒 Senha", type="password", placeholder="Digite sua senha")
 
-                    # CORREÇÃO: Removido o parâmetro 'width' que não é aceito
                     col_btn1, col_btn2 = st.columns([3, 1])
                     with col_btn1:
                         submit = st.form_submit_button("🔓 Entrar", type="primary", use_container_width=True)
@@ -62,9 +68,19 @@ class LoginPage:
                     if submit:
                         if not login or not senha:
                             st.error("⚠️ Preencha todos os campos!")
+                            # Registrar tentativa com IP
+                            self.audit.registrar(
+                                login if login else "ANÔNIMO",
+                                "AUTH",
+                                "Tentativa de login falha",
+                                "Campos vazios",
+                                ip_address=client_ip
+                            )
                         else:
                             with st.spinner("Validando credenciais..."):
-                                usuario = self.auth.login(login, senha)
+                                # Passar o IP real para o auth service
+                                usuario = self.auth.login(login, senha, ip=client_ip)
+                                
                                 if usuario:
                                     # Guarda TANTO o login quanto o nome
                                     st.session_state.logado = True
@@ -72,6 +88,7 @@ class LoginPage:
                                     st.session_state.usuario_nome = usuario["nome"]
                                     st.session_state.nivel_acesso = usuario["nivel_acesso"]
                                     st.session_state.pagina_atual = "dashboard"
+                                    st.session_state.usuario_ip = client_ip  # Salvar IP na sessão
                                     st.success(f"✅ Bem-vindo(a), {usuario['nome']}!")
 
                                     self.audit.registrar(
@@ -79,26 +96,28 @@ class LoginPage:
                                         "AUTH",
                                         "Login realizado",
                                         f"Login bem-sucedido: {usuario['nome']}",
-                                        "127.0.0.1"
+                                        ip_address=client_ip
                                     )
 
                                     st.rerun()
                                 else:
                                     st.error("❌ Login ou senha incorretos!")
+                                    # Já registrado dentro do auth.login, mas vamos garantir
                                     self.audit.registrar(
                                         login,
                                         "AUTH",
                                         "Tentativa de login falha",
                                         "Credenciais inválidas",
-                                        "127.0.0.1"
+                                        ip_address=client_ip
                                     )
 
         st.markdown("---")
         st.markdown(
-            """
+            f"""
             <div style="text-align: center; color: #6b7280; font-size: 12px;">
-                <p>NASST Digital v1.0 | Sistema de Controle de Vacinação</p>
+                <p>NASST Digital v1.1 | Sistema de Controle de Vacinação</p>
                 <p>© 2026 - Todos os direitos reservados</p>
+                <p>🌐 Seu endereço IP: {ip_masked}</p>
             </div>
             """,
             unsafe_allow_html=True
