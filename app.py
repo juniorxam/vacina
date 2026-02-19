@@ -1,6 +1,5 @@
 """
-app.py - NASST Digital v1.1
-Ponto de entrada principal da aplicação Streamlit
+app.py - NASST Digital v1.1 (com IP real)
 """
 
 import streamlit as st
@@ -9,8 +8,6 @@ import sys
 import atexit
 from datetime import datetime
 
-# No início do app.py, após os imports
-
 # Detectar ambiente Cloud
 IS_CLOUD = os.getenv('STREAMLIT_CLOUD', 'false').lower() == 'true'
 
@@ -18,12 +15,9 @@ if IS_CLOUD:
     print("=" * 60)
     print("🚀 NASST Digital rodando no Streamlit Cloud")
     print("=" * 60)
-    
-    # Configurações específicas para cloud
     os.environ['ENVIRONMENT'] = 'production'
 
-
-# Configuração da página DEVE ser a primeira chamada Streamlit
+# Configuração da página
 st.set_page_config(
     page_title="NASST Digital - Controle de Vacinação",
     page_icon="💉",
@@ -31,11 +25,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Configurar logging ANTES de qualquer outra coisa
+# Configurar logging
 from core.logger import setup_logging, get_logger
 logger = setup_logging()
 logger.info("=" * 60)
-logger.info("NASST Digital iniciando - v1.1")
+logger.info("NASST Digital iniciando - v1.1 (com IP real)")
 logger.info("=" * 60)
 
 # CSS para esconder navegação padrão
@@ -63,6 +57,7 @@ from core.whatsapp_service import NotificacaoCampanhaService
 from ui.styles import Styles
 from ui.components import UIComponents
 from core.backup import BackupManager, BackupScheduler
+from core.ip_utils import IPUtils  # NOVO
 
 # Imports das páginas
 import importlib.util
@@ -101,10 +96,7 @@ NotificacoesPage = load_page_class("notificacoes.py", "NotificacoesPage")
 
 
 class NASSTApp:
-    """
-    Classe principal da aplicação NASST Digital.
-    Gerencia estado, serviços, navegação e injeção de dependências.
-    """
+    """Classe principal da aplicação NASST Digital"""
     
     def __init__(self):
         self.db = None
@@ -171,17 +163,11 @@ class NASSTApp:
     def _init_backup(self):
         """Inicializa o sistema de backup automático"""
         try:
-            # Criar diretório de backups se não existir
             os.makedirs("backups", exist_ok=True)
-            
-            # Inicializar gerenciador de backup
             self.backup_manager = BackupManager(CONFIG.db_path_v7, "backups")
-            
-            # Carregar configurações de agendamento
             scheduler = BackupScheduler(self.backup_manager)
             schedule_config = scheduler.load_schedule()
             
-            # Iniciar backup automático se estiver configurado
             if schedule_config.get("enabled", False):
                 interval = schedule_config.get("interval", 24)
                 self.backup_manager.start_auto_backup(
@@ -190,14 +176,12 @@ class NASSTApp:
                 )
                 logger.info(f"Backup automático iniciado: {interval}h")
                 
-                # Registrar no log de auditoria
                 if hasattr(self, 'audit') and self.audit:
                     self.audit.registrar(
                         "SISTEMA",
                         "BACKUP",
                         "Backup automático iniciado",
-                        f"Intervalo: {interval} horas",
-                        "127.0.0.1"
+                        f"Intervalo: {interval} horas"
                     )
         
         except Exception as e:
@@ -213,8 +197,7 @@ class NASSTApp:
                     "SISTEMA",
                     "BACKUP",
                     "Backup automático concluído",
-                    f"Arquivo: {os.path.basename(backup_path)}",
-                    "127.0.0.1"
+                    f"Arquivo: {os.path.basename(backup_path)}"
                 )
         except Exception as e:
             logger.error(f"Erro no callback de backup: {e}")
@@ -232,8 +215,7 @@ class NASSTApp:
                     "SISTEMA",
                     "BACKUP",
                     "Backup automático encerrado",
-                    "Aplicação finalizada",
-                    "127.0.0.1"
+                    "Aplicação finalizada"
                 )
     
     def _init_session_state(self):
@@ -251,7 +233,12 @@ class NASSTApp:
             "dados_vacinacao_processados": None,
             "vacinacao_submit_lock": False,
             "page_gerenciar": 1,
+            "usuario_ip": None,  # NOVO: IP do usuário
         }
+        
+        # Capturar IP atual se não tiver
+        if 'usuario_ip' not in st.session_state or not st.session_state.usuario_ip:
+            st.session_state.usuario_ip = IPUtils.get_client_ip()
         
         for key, value in defaults.items():
             if key not in st.session_state:
@@ -314,8 +301,12 @@ class NASSTApp:
                     st.rerun()
             
             st.markdown("---")
+            
+            # Informações do usuário com IP
+            ip_masked = IPUtils.mask_ip(st.session_state.get('usuario_ip', '127.0.0.1'))
             st.markdown(f"**👤 {st.session_state.get('usuario_nome', 'Usuário')}**")
             st.markdown(f"🔑 {st.session_state.get('nivel_acesso', 'VISUALIZADOR')}")
+            st.caption(f"🌐 IP: {ip_masked}")
             
             if st.button("🔐 Alterar Minha Senha", use_container_width=True, type="secondary", key="btn_alterar_senha"):
                 st.session_state.pagina_atual = "alterar_senha"
@@ -327,7 +318,9 @@ class NASSTApp:
     def _logout(self):
         """Realiza logout do usuário"""
         usuario = st.session_state.get('usuario_nome', '')
-        logger.info(f"Logout do usuário: {usuario}")
+        ip = st.session_state.get('usuario_ip', IPUtils.get_client_ip())
+        
+        logger.info(f"Logout do usuário: {usuario} (IP: {IPUtils.mask_ip(ip)})")
         
         # Registra no audit
         if usuario and hasattr(self, 'audit') and self.audit:
@@ -337,7 +330,7 @@ class NASSTApp:
                     "AUTH",
                     "Logout",
                     "Usuário desconectou do sistema",
-                    "127.0.0.1"
+                    ip_address=ip
                 )
             except Exception as e:
                 logger.error(f"Erro ao registrar logout: {e}")
@@ -348,7 +341,8 @@ class NASSTApp:
             "pagina_atual", "ultima_busca", "servidores_filtrados",
             "relatorio_avancado", "servidores_massa", 
             "dados_vacinacao_processados", "page_gerenciar",
-            "dose_excluir", "usuario_excluir", "registros_vacinacao"
+            "dose_excluir", "usuario_excluir", "registros_vacinacao",
+            "usuario_ip"
         ]
         
         for key in keys_to_clear:
